@@ -1,263 +1,332 @@
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <iostream>
-#include <fstream>
-#include <cstring>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <filesystem>
-#include <vector>
-#include <sstream>
+#include<iostream>
+#include<fstream>
+#include<cstring>
+#include<vector>
+#include<sstream>
+#include<arpa/inet.h>
+#include<netinet/in.h>
+#include<sys/socket.h>
+#include<filesystem>
+#include<unistd.h>
+
 
 constexpr char IP_ADDRESS[] = "127.0.0.1";
 constexpr int PORT_NO = 15050;
 constexpr int NET_BUF_SIZE = 1024;
-constexpr char clientDir[] = "client_files";
-
-enum class Protocol { TCP, UDP };
+constexpr char client_dir[] = "client_files";
 
 
-void createClientDirectory() {
-    if (!std::filesystem::exists(clientDir)) {
-        std::filesystem::create_directory(clientDir);
-        std::cout << "Created directory: " << clientDir << std::endl;
+using namespace std;
+
+
+enum class Protocol{ TCP, UDP };
+
+
+// MAKE CLIENT DIRECTORY [JUST FOR EASE IN TESTING]
+void MAKE_CLIENT_DIR(){
+    if(!filesystem::exists(client_dir)){
+        filesystem::create_directory(client_dir);
+        cout<<"\n=> CREATED DIRECTORY :: [ "<<client_dir<<" ]"<<endl;
     }
 }
 
 
-void clearBuf(char* b, int size = NET_BUF_SIZE) {
+// FREEUP ENTIRE BUFFER SPACE
+void FREEUP_BUFFER(char* b, int size = NET_BUF_SIZE){
     memset(b, '\0', size);
 }
 
 
-void setupTCPConnection(int sockfd, sockaddr_in& serverAddr, const std::string& username) {
-    if (connect(sockfd, reinterpret_cast<sockaddr*>(&serverAddr), sizeof(serverAddr)) < 0) {
-        std::cerr << "TCP Connection Failed!\n";
+// ESTABLISH TCP CONNECTION.
+void MAKE_TCP_CONNECT(int sockfd, sockaddr_in& serverAddr, const string& username){
+
+    if(connect(sockfd, reinterpret_cast<sockaddr*>(&serverAddr), sizeof(serverAddr))<0){
+        cerr<<"TCP Connection Failed!\n";
         exit(1);
     }
-    
-    std::string command = "USERNAME " + username;
+    string command = "USERNAME " + username;
     send(sockfd, command.c_str(), command.size() + 1, 0);
 }
 
 
-void setupUDPConnection(int sockfd, sockaddr_in& serverAddr, const std::string& username) {
-    std::string command = "USERNAME " + username;
-    sendto(sockfd, command.c_str(), command.size() + 1, 0,
-          reinterpret_cast<sockaddr*>(&serverAddr), sizeof(serverAddr));
+// ESTABLISH UDP CONNECTION.
+void MAKE_UDP_CONNECT(int sockfd, sockaddr_in& serverAddr, const string& username){
+    string command = "USERNAME " + username;
+    sendto(sockfd, command.c_str(), command.size() + 1, 0, reinterpret_cast<sockaddr*>(&serverAddr), sizeof(serverAddr));
 }
 
+
+/////////////////////////////////////////////////////////////
+////////////////////////// { TCP } //////////////////////////
 /////////////////////////////////////////////////////////////
 
 
-void requestFileListTCP(int sockfd) {
+// LIST FILES USING TCP CONNECTION.
+void LIST_FILE_TCP(int sockfd){
+
     const char* command = "LIST";
     send(sockfd, command, strlen(command) + 1, 0);
 
-    std::cout << "\nAvailable files on server:\n";
-    std::cout << "--------------------------\n";
+    cout<<"\n=> FILES AVAILABLE ON SERVER ::\n";
+    cout<<"|----------------------------|\n";
 
     char buffer[NET_BUF_SIZE];
-    while (true) {
-        clearBuf(buffer);
-        int bytesReceived = recv(sockfd, buffer, NET_BUF_SIZE, 0);
+    bool FLAG = false;
+    
+    while(!FLAG){
+        FREEUP_BUFFER(buffer);
+        int byt_rev = recv(sockfd, buffer, NET_BUF_SIZE, 0);
         
-        if (bytesReceived <= 0 || buffer[0] == EOF) {
+        if(byt_rev <= 0 || buffer[0] == EOF){
+            FLAG = true;
+        }
+        else{
+            cout<<buffer;
+        }
+    }
+    cout<<"|----------------------------|\n";
+}
+
+
+// DOWNLOAD FILE FROM SERVER.
+void DOWNLOAD_TCP(int sockfd, const char* filename){
+
+    string command = "DOWNLOAD " + string(filename);
+    send(sockfd, command.c_str(), command.size() + 1, 0);
+
+    // FIRST RECIEVE THE FILE SIZE.
+    streamsize fileSize;
+    recv(sockfd, &fileSize, sizeof(fileSize), 0);
+    
+    if(fileSize<=0){
+        cerr<<"\n FILE NOT AVAILABLE OR IS EMPTY <^-^> "<<endl;
+        return;
+    }
+
+    string filepath = string(client_dir) + "/" + filename;
+    ofstream file(filepath, ios::binary);
+    
+    if(!file.is_open()){
+        cerr<<"\n FAILED TO CREATE FILE :: [ "<<filename<<" ]"<<endl;
+        return;
+    }
+
+    char buffer[NET_BUF_SIZE];
+    streamsize crr_rev = 0;
+    
+    while(crr_rev<fileSize){
+
+        streamsize remaining = fileSize - crr_rev;
+        streamsize chunkSize = min(static_cast<streamsize>(NET_BUF_SIZE), remaining);
+        
+        ssize_t byt_rev = recv(sockfd, buffer, chunkSize, 0);
+        if(byt_rev <= 0){
+            cerr<<"\nERROR RECIEVING FILE DATA."<<endl;
             break;
         }
-        std::cout << buffer;
-    }
-    std::cout << "--------------------------\n";
-}
-
-
-void downloadFileTCP(int sockfd, const char* filename) {
-    std::string command = "DOWNLOAD " + std::string(filename);
-    send(sockfd, command.c_str(), command.size() + 1, 0);
-
-    std::string filepath = std::string(clientDir) + "/" + filename;
-    std::ofstream file(filepath, std::ios::binary);
-    
-    if (!file.is_open()) {
-        std::cerr << "Failed to create file: " << filename << std::endl;
-        return;
-    }
-
-    char buffer[NET_BUF_SIZE];
-    while (true) {
-        clearBuf(buffer);
-        int bytesReceived = recv(sockfd, buffer, NET_BUF_SIZE, 0);
         
-        if (bytesReceived <= 0) {
-            break;  // Connection closed
-        }
-        if (buffer[0] == EOF) {
-            break;  // End of file
-        }
-        file.write(buffer, bytesReceived);
+        file.write(buffer, byt_rev);
+        crr_rev += byt_rev;
     }
 
     file.close();
-    std::cout << "File downloaded: " << filename << std::endl;
+    
+    if(crr_rev == fileSize){
+        cout<<"\n=> FILE DOWNLOADED SUCCESSFULLY :: [ "<<crr_rev<<" BYT ]  :: { "<<filename<<" } "<<endl;
+    }
+    else{
+        cout<<"\n=> ISSUE DOWNLOADING FILE :: [ "<<crr_rev<<" ] / { "<<fileSize<<" BYT} :: [ "<<filename<<" ]"<<endl;
+    }
 }
 
 
-void uploadFileTCP(int sockfd, const char* filename) {
-    std::string filepath = std::string(clientDir) + "/" + filename;
-    std::ifstream file(filepath, std::ios::binary);
+// UPLOAD FILE TO SERVER
+void UPLOAD_TCP(int sockfd, const char* filename){
     
-    if (!file.is_open()) {
-        std::cerr << "File not found: " << filename << std::endl;
+    string command = "UPLOAD " + string(filename);
+    if(send(sockfd, command.c_str(), command.size() + 1, 0) <= 0){
+        cerr<<"\n FAILED TO SEND UPLOAD COMMAND TO SERVER."<<endl;
         return;
     }
 
-    // Send UPLOAD command
-    std::string command = "UPLOAD " + std::string(filename);
-    send(sockfd, command.c_str(), command.size() + 1, 0);
-
-    // Wait for server to be ready (optional)
-    char ack[NET_BUF_SIZE];
-    recv(sockfd, ack, NET_BUF_SIZE, 0);
-
-    char buffer[NET_BUF_SIZE];
-    while (!file.eof()) {
-        clearBuf(buffer);
-        file.read(buffer, NET_BUF_SIZE);
-        int bytesRead = file.gcount();
-        if (bytesRead > 0) {
-            send(sockfd, buffer, bytesRead, 0);
-        }
+    string filepath = string(client_dir) + "/" + filename;
+    ifstream file(filepath, ios::binary | ios::ate);
+    if(!file.is_open()){
+        cerr<<"FILE NOT FOUND :: [ "<<filepath<<" ]"<<endl;
+        return;
     }
 
-    // Send EOF marker
-    clearBuf(buffer);
-    buffer[0] = EOF;
-    send(sockfd, buffer, 1, 0);
-
+    uint64_t fileSize = file.tellg();
+    file.seekg(0, ios::beg);
+    uint64_t fs_net = htobe64(fileSize);
+    
+    if(send(sockfd, &fs_net, sizeof(fs_net), 0) != sizeof(fs_net)){
+        cerr<<"Failed to send file size."<<endl;
+        file.close();
+        return;
+    }
+    
+    char buffer[NET_BUF_SIZE];
+    uint64_t totalSent = 0;
+    while(totalSent<fileSize){
+        uint64_t remaining = fileSize - totalSent;
+        uint64_t chunkSize = min((uint64_t)NET_BUF_SIZE, remaining);
+        
+        file.read(buffer, chunkSize);
+        ssize_t sent = send(sockfd, buffer, chunkSize, 0);
+        if(sent<=0){
+            cerr<<"Error sending file data."<<endl;
+            file.close();
+            return;
+        }
+        
+        totalSent += sent;
+        cout<<"\n UPLOADING FILE :: { "<<(totalSent*100/fileSize)<<" } % " <<flush<<endl;
+    }
+    
     file.close();
-    std::cout << "File uploaded: " << filename << std::endl;
+    cout<<"\n=> FILE UPLOADED SUCCESSFULLY :: [ "<<filename<<" ] :: { "<<totalSent<<" BYTES}"<<endl;
+    
+    // GET THE SERVER ACK.
+    char ack;
+    if(recv(sockfd, &ack, 1, 0) > 0 && ack == '1'){
+        cout<<"Server acknowledged file upload."<<endl;
+    }
+    else{
+        cerr<<"No acknowledgment from server."<<endl;
+    }
 }
 
 
 /////////////////////////////////////////////////////////////
+////////////////////////// { UDP } //////////////////////////
+/////////////////////////////////////////////////////////////
 
 
-void requestFileListUDP(int sockfd, sockaddr_in& serverAddr, socklen_t addrlen) {
+// FUNCTION TO LIST FILES USING UDP.
+void LIST_FILE_UDP(int sockfd, sockaddr_in& serverAddr, socklen_t addrlen) {
+    
     const char* command = "LIST";
-    sendto(sockfd, command, strlen(command) + 1, 0,
-          reinterpret_cast<sockaddr*>(&serverAddr), addrlen);
+    sendto(sockfd, command, strlen(command)+1, 0, reinterpret_cast<sockaddr*>(&serverAddr), addrlen);
 
-    std::cout << "\nAvailable files on server:\n";
-    std::cout << "--------------------------\n";
+    cout<<"\nAvailable files on server:\n";
+    cout<<"--------------------------\n";
 
     char buffer[NET_BUF_SIZE];
-    bool transferComplete = false;
+    bool FLAG = false;
     
-    while (!transferComplete) {
-        clearBuf(buffer);
-        int bytesReceived = recvfrom(sockfd, buffer, NET_BUF_SIZE, 0,
-                                   reinterpret_cast<sockaddr*>(&serverAddr), &addrlen);
+    while(!FLAG){
         
-        if (bytesReceived <= 0 || buffer[0] == EOF) {
-            transferComplete = true;
-        } else {
-            std::cout << buffer;
+        FREEUP_BUFFER(buffer);
+        int byt_rev = recvfrom(sockfd, buffer, NET_BUF_SIZE, 0, reinterpret_cast<sockaddr*>(&serverAddr), &addrlen);
+        
+        if(byt_rev <= 0 || buffer[0] == EOF){
+            FLAG = true;
+        }
+        else{
+            cout << buffer;
         }
     }
-    std::cout << "--------------------------\n";
+    cout<<"--------------------------\n";
 }
 
 
-void downloadFileUDP(int sockfd, sockaddr_in& serverAddr, socklen_t addrlen, const char* filename) {
-    std::string command = "DOWNLOAD " + std::string(filename);
-    sendto(sockfd, command.c_str(), command.size() + 1, 0,
-          reinterpret_cast<sockaddr*>(&serverAddr), addrlen);
-
-    std::string filepath = std::string(clientDir) + "/" + filename;
-    std::ofstream file(filepath, std::ios::binary);
+// DOWNLOAD FILES FROM SERVER.
+void DOWNLOAD_UDP(int sockfd, sockaddr_in& serverAddr, socklen_t addrlen, const char* filename) {
     
-    if (!file.is_open()) {
-        std::cerr << "Failed to create file: " << filename << std::endl;
+    string command = "DOWNLOAD " + string(filename);
+    sendto(sockfd, command.c_str(), command.size() + 1, 0, reinterpret_cast<sockaddr*>(&serverAddr), addrlen);
+
+    string filepath = string(client_dir) + "/" + filename;
+    ofstream file(filepath, ios::binary);
+    
+    if(!file.is_open()){
+        cout<<"\n FAILED TO CREATE FILE  :: { "<<filename<<" }"<<endl;
         return;
     }
 
     char buffer[NET_BUF_SIZE];
-    bool transferComplete = false;
+    bool FLAG = false;
     
-    while (!transferComplete) {
-        clearBuf(buffer);
-        int bytesReceived = recvfrom(sockfd, buffer, NET_BUF_SIZE, 0,
-                                   reinterpret_cast<sockaddr*>(&serverAddr), &addrlen);
+    while(!FLAG){
+        FREEUP_BUFFER(buffer);
+        int byt_rev = recvfrom(sockfd, buffer, NET_BUF_SIZE, 0, reinterpret_cast<sockaddr*>(&serverAddr), &addrlen);
         
-        if (bytesReceived <= 0 || buffer[0] == EOF) {
-            transferComplete = true;
-        } else {
-            file.write(buffer, bytesReceived - 1); // -1 to exclude null terminator
+        if(byt_rev <= 0 || buffer[0] == EOF){
+            FLAG = true;
+        }
+        else{
+            file.write(buffer, byt_rev - 1);
         }
     }
 
     file.close();
-    std::cout << "File downloaded: " << filename << std::endl;
+    cout<<"\n FILE DOWNLOADED  :: { "<<filename<<" }"<<endl;
 }
 
 
-void uploadFileUDP(int sockfd, sockaddr_in& serverAddr, socklen_t addrlen, const char* filename) {
-    std::string filepath = std::string(clientDir) + "/" + filename;
-    std::ifstream file(filepath, std::ios::binary);
+// UPLOAD FILES TO SERVER USING UDP.
+void UPLOAD_UDP(int sockfd, sockaddr_in& serverAddr, socklen_t addrlen, const char* filename){
     
-    if (!file.is_open()) {
-        std::cerr << "File not found: " << filename << std::endl;
+    string filepath = string(client_dir) + "/" + filename;
+    ifstream file(filepath, ios::binary);
+    
+    if(!file.is_open()){
+        cout<<"\n FILE NOT FOUND  :: { "<<filename<<" }"<<endl;
         return;
     }
 
-    std::string command = "UPLOAD " + std::string(filename);
-    sendto(sockfd, command.c_str(), command.size() + 1, 0,
-          reinterpret_cast<sockaddr*>(&serverAddr), addrlen);
+    string command = "UPLOAD " + string(filename);
+    sendto(sockfd, command.c_str(), command.size() + 1, 0, reinterpret_cast<sockaddr*>(&serverAddr), addrlen);
 
     char buffer[NET_BUF_SIZE];
-    while (!file.eof()) {
-        clearBuf(buffer);
+    while(!file.eof()){
+        FREEUP_BUFFER(buffer);
         file.read(buffer, NET_BUF_SIZE - 1);
-        int bytesRead = file.gcount();
-        if (bytesRead > 0) {
-            sendto(sockfd, buffer, bytesRead + 1, 0,
-                  reinterpret_cast<sockaddr*>(&serverAddr), addrlen);
+        int byt_read = file.gcount();
+        if(byt_read>0){
+            sendto(sockfd, buffer, byt_read + 1, 0, reinterpret_cast<sockaddr*>(&serverAddr), addrlen);
         }
     }
 
-    // Send EOF marker
-    clearBuf(buffer);
+    // SEND EOF MARKER
+    FREEUP_BUFFER(buffer);
     buffer[0] = EOF;
-    sendto(sockfd, buffer, NET_BUF_SIZE, 0,
-          reinterpret_cast<sockaddr*>(&serverAddr), addrlen);
+    sendto(sockfd, buffer, NET_BUF_SIZE, 0, reinterpret_cast<sockaddr*>(&serverAddr), addrlen);
 
     file.close();
-    std::cout << "File uploaded: " << filename << std::endl;
+    cout<<"\n FILE UPLOADED  :: { "<<filename<<" }"<<endl;
 }
+
+
+///////////////////////////////////////////////////////////////
 
 
 // OUR BELOVED MAIN FUNCTION.
-int main() {
-    createClientDirectory();
+int main(){
 
-    std::string username;
-    std::cout << "Enter your username: ";
-    std::getline(std::cin, username);
+    MAKE_CLIENT_DIR();
+
+    string username;
+    cout<<"\n ENTER USERNAME TO PROCEED <^-^>  ::";
+    getline(cin, username);
 
     Protocol protocol;
-    std::cout << "Select protocol (1 for TCP, 2 for UDP): ";
+    cout<<"\n SELECT PROTOCOL [1]. TCP & [2]. UDP ";
     int choice;
-    std::cin >> choice;
-    std::cin.ignore(); // Clear input buffer
+    cin>>choice;
+    cin.ignore();
     
-    if (choice == 1) {
-        std::cout << "TCP protocol selected\n";
+    if(choice == 1){
+        cout<<"TCP SELECTED. [RELIABLE AND CONNECTION ORIENTED]\n";
         protocol = Protocol::TCP;
-    } else if (choice == 2) {
-        std::cout << "UDP protocol selected\n";
+    } 
+    else if(choice == 2){
+        cout<<"TCP SELECTED. [UNRELIABLE AND CONNECTION LESS]\n";
         protocol = Protocol::UDP;
-    } else {
-        std::cerr << "Invalid protocol selection!\n";
+    }
+    else{
+        cerr<<"SELECT CORRECT TYPE!\n";
         return 1;
     }
 
@@ -269,71 +338,85 @@ int main() {
     serverAddr.sin_port = htons(PORT_NO);
     serverAddr.sin_addr.s_addr = inet_addr(IP_ADDRESS);
     
-    if (protocol == Protocol::TCP) {
+    if(protocol == Protocol::TCP){
         sockfd = socket(AF_INET, SOCK_STREAM, 0);
-        if (sockfd < 0) {
-            std::cerr << "TCP Socket creation failed!\n";
+        if(sockfd<0){
+            cerr<<"TCP Socket creation failed!\n";
             return 1;
         }
-        setupTCPConnection(sockfd, serverAddr, username);
-    } else {
+        MAKE_TCP_CONNECT(sockfd, serverAddr, username);
+    }
+    else{
         sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-        if (sockfd < 0) {
-            std::cerr << "UDP Socket creation failed!\n";
+        if(sockfd<0){
+            cerr<<"UDP Socket creation failed!\n";
             return 1;
         }
-        setupUDPConnection(sockfd, serverAddr, username);
+        MAKE_UDP_CONNECT(sockfd, serverAddr, username);
     }
 
-    while (true) {
-        std::cout << "\nChoose operation:\n";
-        std::cout << "1. List available files on server\n";
-        std::cout << "2. Download file from server\n";
-        std::cout << "3. Upload file to server\n";
-        std::cout << "4. Exit\n";
-        std::cout << "Enter choice: ";
+    while(true){
+        cout<<"\n=> SELECT OPERATION <^-^>\n";
+        cout<<"[1]. LIST FILES ON SERVER\n";
+        cout<<"[2]. DOWNLOAD FILES FROM SERVER.\n";
+        cout<<"[3]. UPLOAD FILES TO SERVER.\n";
+        cout<<"[0]. EXIT.\n";
+        cout<<"Enter choice: ";
         
-        int operation;
-        std::cin >> operation;
-        std::cin.ignore(); // Clear input buffer
+        int op;
+        cin>>op;
+        cin.ignore();
 
-        if (operation == 4) break;
+        if(op == 0){
+            break;
+        }
 
-        switch (operation) {
+        switch(op){
             case 1:
-                if (protocol == Protocol::TCP) {
-                    requestFileListTCP(sockfd);
-                } else {
-                    requestFileListUDP(sockfd, serverAddr, addrlen);
-                }
-                break;
-            case 2: {
-                std::string filename;
-                std::cout << "Enter filename to download: ";
-                std::getline(std::cin, filename);
-                if (protocol == Protocol::TCP) {
-                    downloadFileTCP(sockfd, filename.c_str());
-                } else {
-                    downloadFileUDP(sockfd, serverAddr, addrlen, filename.c_str());
+            {
+                if(protocol == Protocol::TCP){
+                    LIST_FILE_TCP(sockfd);
+                } 
+                else{
+                    LIST_FILE_UDP(sockfd, serverAddr, addrlen);
                 }
                 break;
             }
-            case 3: {
-                std::string filename;
-                std::cout << "Enter filename to upload: ";
-                std::getline(std::cin, filename);
-                if (protocol == Protocol::TCP) {
-                    uploadFileTCP(sockfd, filename.c_str());
-                } else {
-                    uploadFileUDP(sockfd, serverAddr, addrlen, filename.c_str());
+            case 2:
+            {
+                string filename;
+                cout<<"\n ENTER FILE NAME ALONG EXTENXION TO DOWNLOAD.";
+                getline(cin, filename);
+                if(protocol == Protocol::TCP){
+                    DOWNLOAD_TCP(sockfd, filename.c_str());
+                }
+                else{
+                    DOWNLOAD_UDP(sockfd, serverAddr, addrlen, filename.c_str());
+                }
+                break;
+            }
+            case 3:
+            {
+                string filename;
+                cout<<"\n ENTER FILENAME TO UPLOAD <^-^> ";
+                getline(cin, filename);
+                if(protocol == Protocol::TCP){
+                    UPLOAD_TCP(sockfd, filename.c_str());
+                }
+                else{
+                    UPLOAD_UDP(sockfd, serverAddr, addrlen, filename.c_str());
                 }
                 break;
             }
             default:
-                std::cout << "Invalid choice!\n";
+            {
+                cout<<"INVALID CHOICE!\n";
+            }
         }
+    
     }
-
     close(sockfd);
-    return 0;
+
+return 0;
 }
+
