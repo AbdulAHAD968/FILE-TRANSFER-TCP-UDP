@@ -17,23 +17,26 @@ A simple yet efficient file transfer system that allows clients to upload/downlo
 
 ---
 
-## 🗂 File Structure
-.
-├── client.cpp # Client-side implementation
-├── client_files/ # Default client file storage
-│ ├── 1.txt
-│ ├── 2.txt
-│ ├── 3.txt
-│ └── 4.txt
-├── server.cpp # Server-side implementation
-├── server_files/ # Server file storage
-│ ├── 1.txt
-│ ├── 2.txt
-│ ├── 3.txt
-│ └── 4.txt
-├── server_log.txt # Server activity logs
-└── Makefile # Compilation instructions
+## 📁 Project Structure
 
+```bash
+.
+├── client.cpp           # Client-side logic
+├── client_files/        # Local client file storage
+│   ├── 1.txt
+│   ├── 2.txt
+│   ├── 3.txt
+│   └── 4.txt
+├── server.cpp           # Server-side logic
+├── server_files/        # Central server file repository
+│   ├── 1.txt
+│   ├── 2.txt
+│   ├── 3.txt
+│   └── 4.txt
+├── server_log.txt       # Logs of server activity
+└── Makefile             # Build instructions
+
+```
 ---
 
 ## 🚀 How It Works
