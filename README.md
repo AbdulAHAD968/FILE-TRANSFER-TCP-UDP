@@ -61,3 +61,11 @@ A simple yet efficient file transfer system that allows clients to upload/downlo
 1. **Compile**:
    ```bash
    make all
+2. **Command to Run Server**:
+   ```bash
+   g++ -o s.out server.cpp && ./s.out
+3. **Command to Run Client**:
+   ```bash
+   g++ -o c.out client.cpp && ./s.out
+
+=> **Do what ever you want to do then but it will have limitations obviously.**
